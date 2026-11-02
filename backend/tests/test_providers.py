@@ -1,9 +1,10 @@
 import unittest
+import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app.config import Settings
-from app.providers import ProviderError, chat
+from app.providers import ProviderError, _request_chat, chat
 
 
 def settings(**overrides):
@@ -24,6 +25,24 @@ def settings(**overrides):
 
 
 class ChatFallbackTests(unittest.TestCase):
+    @patch("app.providers.urlopen")
+    def test_disables_thinking_for_qwen35_models(self, open_url):
+        response = Mock()
+        response.read.return_value = b'{"message":{"content":"hello"}}'
+        open_url.return_value.__enter__.return_value = response
+
+        result = _request_chat(
+            "ollama",
+            [{"role": "user", "content": "hi"}],
+            settings(ollama_model="qwen3.5:4b"),
+        )
+
+        payload = json.loads(open_url.call_args.args[0].data)
+        self.assertEqual(open_url.call_args.args[0].full_url, "http://localhost:11434/api/chat")
+        self.assertIs(payload["think"], False)
+        self.assertEqual(payload["options"]["num_predict"], 512)
+        self.assertEqual(result, "hello")
+
     @patch("app.providers._request_chat")
     def test_uses_primary_provider_when_available(self, request_chat):
         request_chat.return_value = "hello"

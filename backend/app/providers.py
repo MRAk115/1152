@@ -11,19 +11,23 @@ class ProviderError(RuntimeError):
 
 def _request_chat(provider: str, messages: list[dict[str, str]], settings: Settings) -> str:
     if provider == "ollama":
-        url = f"{settings.ollama_url}/v1/chat/completions"
+        url = f"{settings.ollama_url}/api/chat"
         model = settings.ollama_model
         api_key = "ollama"
+        request_body = {"model": model, "messages": messages, "stream": False}
+        if model.startswith("qwen3.5:"):
+            request_body.update(think=False, options={"num_predict": 512})
     elif provider == "openai":
         if not settings.openai_api_key:
             raise ProviderError("JARVIS_OPENAI_API_KEY is not set.")
         url = "https://api.openai.com/v1/chat/completions"
         model = settings.openai_model
         api_key = settings.openai_api_key
+        request_body = {"model": model, "messages": messages}
     else:
         raise ProviderError(f"Unsupported provider: {provider}")
 
-    payload = json.dumps({"model": model, "messages": messages}).encode("utf-8")
+    payload = json.dumps(request_body).encode("utf-8")
     request = Request(
         url,
         data=payload,
@@ -40,7 +44,10 @@ def _request_chat(provider: str, messages: list[dict[str, str]], settings: Setti
         raise ProviderError(f"{provider} request failed: {error}") from error
 
     try:
-        content = result["choices"][0]["message"]["content"]
+        if provider == "ollama":
+            content = result["message"]["content"]
+        else:
+            content = result["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as error:
         raise ProviderError(f"{provider} returned an unexpected chat response.") from error
     if not isinstance(content, str) or not content.strip():
